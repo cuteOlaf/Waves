@@ -1,27 +1,26 @@
 package com.wavesplatform
 
-import java.io.{File, FileNotFoundException}
-import java.nio.file.Files
-import java.time.Instant
-
-import scala.annotation.tailrec
-import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import com.wavesplatform.account.{Address, AddressScheme, KeyPair}
 import com.wavesplatform.block.Block
 import com.wavesplatform.common.state.ByteStr
 import com.wavesplatform.common.utils.EitherExt2
-import com.wavesplatform.consensus.{FairPoSCalculator, NxtPoSCalculator, PoSCalculator}
 import com.wavesplatform.consensus.PoSCalculator.{generationSignature, hit}
-import com.wavesplatform.crypto._
+import com.wavesplatform.consensus.{FairPoSCalculator, NxtPoSCalculator, PoSCalculator}
+import com.wavesplatform.crypto.*
 import com.wavesplatform.features.{BlockchainFeature, BlockchainFeatures}
 import com.wavesplatform.settings.{FunctionalitySettings, GenesisSettings, GenesisTransactionSettings}
 import com.wavesplatform.transaction.{GenesisTransaction, TxNonNegativeAmount}
-import com.wavesplatform.utils._
+import com.wavesplatform.utils.*
 import com.wavesplatform.wallet.Wallet
-import net.ceedubs.ficus.Ficus._
-import net.ceedubs.ficus.readers.ArbitraryTypeReader._
+import net.ceedubs.ficus.Ficus.*
+import net.ceedubs.ficus.readers.ArbitraryTypeReader.*
+
+import java.io.{File, FileNotFoundException}
+import java.nio.file.Files
+import java.time.Instant
+import scala.annotation.tailrec
+import scala.concurrent.duration.*
 
 object GenesisBlockGenerator extends App {
 
@@ -89,7 +88,6 @@ object GenesisBlockGenerator extends App {
     .map(new File(_).getAbsoluteFile.ensuring(f => !f.isDirectory && f.getParentFile.isDirectory || f.getParentFile.mkdirs()))
 
   val settings: Settings = {
-    import net.ceedubs.ficus.readers.namemappers.implicits.hyphenCase
     ConfigFactory.parseFile(inputConfFile).as[Settings]("genesis-generator")
   }
 
@@ -225,23 +223,25 @@ object GenesisBlockGenerator extends App {
       hit(gs)
     }
 
-    shares.collect {
-      case (accountInfo, amount) if accountInfo.miner =>
-        val hit = getHit(accountInfo.account)
+    val baseTargets =
+      shares.collect {
+        case (accountInfo, amount) if accountInfo.miner =>
+          val hit = getHit(accountInfo.account)
 
-        @tailrec def calculateBaseTarget(keyPair: KeyPair, minBT: Long, maxBT: Long, balance: Long): Long =
-          if (maxBT - minBT <= 1) maxBT
-          else {
-            val newBT = (maxBT + minBT) / 2
-            val delay = posCalculator.calculateDelay(hit, newBT, balance)
-            if (math.abs(delay - settings.averageBlockDelay.toMillis) < 100) newBT
+          @tailrec def calculateBaseTarget(keyPair: KeyPair, minBT: Long, maxBT: Long, balance: Long): Long =
+            if (maxBT - minBT <= 1) maxBT
             else {
-              val (min, max) = if (delay > settings.averageBlockDelay.toMillis) (newBT, maxBT) else (minBT, newBT)
-              calculateBaseTarget(keyPair, min, max, balance)
+              val newBT = (maxBT + minBT) / 2
+              val delay = posCalculator.calculateDelay(hit, newBT, balance)
+              if (math.abs(delay - settings.averageBlockDelay.toMillis) < 100) newBT
+              else {
+                val (min, max) = if (delay > settings.averageBlockDelay.toMillis) (newBT, maxBT) else (minBT, newBT)
+                calculateBaseTarget(keyPair, min, max, balance)
+              }
             }
-          }
 
-        calculateBaseTarget(accountInfo.account, PoSCalculator.MinBaseTarget, 1000000, amount)
-    }.max
+          calculateBaseTarget(accountInfo.account, PoSCalculator.MinBaseTarget, 1000000, amount)
+      }
+    baseTargets.sum / baseTargets.length
   }
 }
